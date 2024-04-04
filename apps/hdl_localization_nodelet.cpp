@@ -22,8 +22,7 @@
 
 #include <pcl/filters/voxel_grid.h>
 
-#include <pclomp/ndt_omp.h>
-#include <fast_gicp/ndt/ndt_cuda.hpp>
+#include <pcl/registration/gicp.h>
 
 #include <hdl_localization/pose_estimator.hpp>
 #include <hdl_localization/delta_estimater.hpp>
@@ -84,66 +83,14 @@ public:
 
 private:
   pcl::Registration<PointT, PointT>::Ptr create_registration() const {
-    std::string reg_method = private_nh.param<std::string>("reg_method", "NDT_OMP");
-    std::string ndt_neighbor_search_method = private_nh.param<std::string>("ndt_neighbor_search_method", "DIRECT7");
-    double ndt_neighbor_search_radius = private_nh.param<double>("ndt_neighbor_search_radius", 2.0);
-    double ndt_resolution = private_nh.param<double>("ndt_resolution", 1.0);
-
-    if(reg_method == "NDT_OMP") {
-      NODELET_INFO("NDT_OMP is selected");
-      pclomp::NormalDistributionsTransform<PointT, PointT>::Ptr ndt(new pclomp::NormalDistributionsTransform<PointT, PointT>());
-      ndt->setTransformationEpsilon(0.01);
-      ndt->setResolution(ndt_resolution);
-      if (ndt_neighbor_search_method == "DIRECT1") {
-        NODELET_INFO("search_method DIRECT1 is selected");
-        ndt->setNeighborhoodSearchMethod(pclomp::DIRECT1);
-      } else if (ndt_neighbor_search_method == "DIRECT7") {
-        NODELET_INFO("search_method DIRECT7 is selected");
-        ndt->setNeighborhoodSearchMethod(pclomp::DIRECT7);
-      } else {
-        if (ndt_neighbor_search_method == "KDTREE") {
-          NODELET_INFO("search_method KDTREE is selected");
-        } else {
-          NODELET_WARN("invalid search method was given");
-          NODELET_WARN("default method is selected (KDTREE)");
-        }
-        ndt->setNeighborhoodSearchMethod(pclomp::KDTREE);
-      }
-      return ndt;
-    } else if(reg_method.find("NDT_CUDA") != std::string::npos) {
-      NODELET_INFO("NDT_CUDA is selected");
-      boost::shared_ptr<fast_gicp::NDTCuda<PointT, PointT>> ndt(new fast_gicp::NDTCuda<PointT, PointT>);
-      ndt->setResolution(ndt_resolution);
-
-      if(reg_method.find("D2D") != std::string::npos) {
-        ndt->setDistanceMode(fast_gicp::NDTDistanceMode::D2D);
-      } else if (reg_method.find("P2D") != std::string::npos) {
-        ndt->setDistanceMode(fast_gicp::NDTDistanceMode::P2D);
-      }
-
-      if (ndt_neighbor_search_method == "DIRECT1") {
-        NODELET_INFO("search_method DIRECT1 is selected");
-        ndt->setNeighborSearchMethod(fast_gicp::NeighborSearchMethod::DIRECT1);
-      } else if (ndt_neighbor_search_method == "DIRECT7") {
-        NODELET_INFO("search_method DIRECT7 is selected");
-        ndt->setNeighborSearchMethod(fast_gicp::NeighborSearchMethod::DIRECT7);
-      } else if (ndt_neighbor_search_method == "DIRECT_RADIUS") {
-        NODELET_INFO_STREAM("search_method DIRECT_RADIUS is selected : " << ndt_neighbor_search_radius);
-        ndt->setNeighborSearchMethod(fast_gicp::NeighborSearchMethod::DIRECT_RADIUS, ndt_neighbor_search_radius);
-      } else {
-        NODELET_WARN("invalid search method was given");
-      }
-      return ndt;
-    }
-
-    NODELET_ERROR_STREAM("unknown registration method:" << reg_method);
-    return nullptr;
+    pcl::GeneralizedIterativeClosestPoint<PointT, PointT>::Ptr ndt(new pcl::GeneralizedIterativeClosestPoint<PointT, PointT>());
+    return ndt;
   }
 
   void initialize_params() {
     // intialize scan matching method
     double downsample_resolution = private_nh.param<double>("downsample_resolution", 0.1);
-    boost::shared_ptr<pcl::VoxelGrid<PointT>> voxelgrid(new pcl::VoxelGrid<PointT>());
+    std::shared_ptr<pcl::VoxelGrid<PointT>> voxelgrid(new pcl::VoxelGrid<PointT>());
     voxelgrid->setLeafSize(downsample_resolution, downsample_resolution, downsample_resolution);
     downsample_filter = voxelgrid;
 
@@ -267,7 +214,10 @@ private:
     if(aligned_pub.getNumSubscribers()) {
       aligned->header.frame_id = "map";
       aligned->header.stamp = cloud->header.stamp;
-      aligned_pub.publish(aligned);
+
+      sensor_msgs::PointCloud2 aligned_msg;
+      pcl::toROSMsg(*aligned, aligned_msg);
+      aligned_pub.publish(aligned_msg);
     }
 
     if(status_pub.getNumSubscribers()) {
@@ -464,13 +414,13 @@ private:
       num_valid_points++;
 
       registration->getSearchMethodTarget()->nearestKSearch(pt, 1, k_indices, k_sq_dists);
-      if(k_sq_dists[0] < max_correspondence_dist * max_correspondence_dist) {
+      if(k_sq_dists.size() > 0 && k_sq_dists[0] < max_correspondence_dist * max_correspondence_dist) {
         status.matching_error += k_sq_dists[0];
         num_inliers++;
       }
     }
 
-    status.matching_error /= num_inliers;
+    status.matching_error /= (num_inliers + 1e-6);
     status.inlier_fraction = static_cast<float>(num_inliers) / std::max(1, num_valid_points);
     status.relative_pose = tf2::eigenToTransform(Eigen::Isometry3d(registration->getFinalTransformation().cast<double>())).transform;
 

@@ -1,19 +1,7 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.16.3)
 project(hdl_localization)
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  add_definitions(-std=c++11)
-  set(CMAKE_CXX_FLAGS "-std=c++11")
-else()
-	# -mavx causes a lot of errors!!
-  if("$ENV{ROS_DISTRO}" STRGREATER "melodic")
-    add_definitions(-std=c++17 -msse -msse2 -msse3 -msse4 -msse4.1 -msse4.2)
-    set(CMAKE_CXX_FLAGS "-std=c++17 -msse -msse2 -msse3 -msse4 -msse4.1 -msse4.2")
-  else()
-    add_definitions(-std=c++11 -msse -msse2 -msse3 -msse4 -msse4.1 -msse4.2)
-    set(CMAKE_CXX_FLAGS "-std=c++11 -msse -msse2 -msse3 -msse4 -msse4.1 -msse4.2")
-  endif()
-endif()
+add_compile_options(-std=c++17)
 
 # pcl 1.7 causes a segfault when it is built with debug mode
 set(CMAKE_BUILD_TYPE "RELEASE")
@@ -31,12 +19,10 @@ find_package(catkin REQUIRED COMPONENTS
   sensor_msgs
   geometry_msgs
   message_generation
-  ndt_omp
-  fast_gicp
   hdl_global_localization
 )
 
-find_package(PCL 1.7 REQUIRED)
+find_package(PCL REQUIRED)
 include_directories(${PCL_INCLUDE_DIRS})
 link_directories(${PCL_LIBRARY_DIRS})
 add_definitions(${PCL_DEFINITIONS})
@@ -95,3 +81,30 @@ target_link_libraries(globalmap_server_nodelet
   ${PCL_LIBRARIES}
 )
 
+install(
+  TARGETS
+    hdl_localization_nodelet
+    globalmap_server_nodelet
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+)
+
+install(FILES nodelet_plugins.xml
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
+install(DIRECTORY
+  data
+  launch
+  rviz
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
+install(DIRECTORY include/hdl_localization/
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+)
+
+install(DIRECTORY include/kkl/
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+)

@@ -73,7 +73,9 @@ private:
   }
 
   void pub_once_cb(const ros::WallTimerEvent& event) {
-    globalmap_pub.publish(globalmap);
+    sensor_msgs::PointCloud2 globalmap_msg;
+    pcl::toROSMsg(*globalmap, globalmap_msg);
+    globalmap_pub.publish(globalmap_msg);
   }
 
   void map_update_callback(const std_msgs::String &msg){
@@ -93,7 +95,9 @@ private:
     voxelgrid->filter(*filtered);
 
     globalmap = filtered;
-    globalmap_pub.publish(globalmap);
+    sensor_msgs::PointCloud2 globalmap_msg;
+    pcl::toROSMsg(*globalmap, globalmap_msg);
+    globalmap_pub.publish(globalmap_msg);
   }
 
 private:
