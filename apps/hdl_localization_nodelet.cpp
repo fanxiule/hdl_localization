@@ -23,6 +23,8 @@
 #include <pcl/filters/voxel_grid.h>
 
 #include <pcl/registration/gicp.h>
+#include <pcl/registration/icp.h>
+#include <pcl/registration/ndt.h>
 
 #include <hdl_localization/pose_estimator.hpp>
 #include <hdl_localization/delta_estimater.hpp>
@@ -83,8 +85,35 @@ public:
 
 private:
   pcl::Registration<PointT, PointT>::Ptr create_registration() const {
-    pcl::GeneralizedIterativeClosestPoint<PointT, PointT>::Ptr ndt(new pcl::GeneralizedIterativeClosestPoint<PointT, PointT>());
-    return ndt;
+    pcl::Registration<PointT, PointT>::Ptr matcher;
+    if (scan_matching_method == "NDT")
+    {
+      matcher = pcl::make_shared<pcl::NormalDistributionsTransform<PointT, PointT>>();
+    }
+    else if (scan_matching_method == "GICP")
+    {
+      matcher = pcl::make_shared<pcl::GeneralizedIterativeClosestPoint<PointT, PointT>>();
+    }
+    else if (scan_matching_method == "ICP")
+    {
+      matcher = pcl::make_shared<pcl::IterativeClosestPoint<PointT, PointT>>();
+    }
+    else
+    {
+      NODELET_ERROR_STREAM("Unsupported scan matching method specified.");
+      ros::shutdown();
+      return nullptr;
+    }
+
+    matcher->setMaximumIterations(iterations);
+    matcher->setRANSACIterations(ransac_iterations);
+    matcher->setRANSACOutlierRejectionThreshold(ransac_outlier_rejection);
+    matcher->setMaxCorrespondenceDistance(max_correspondence_distance);
+    matcher->setTransformationEpsilon(transformation_epsilon);
+    matcher->setTransformationRotationEpsilon(rotation_epsilon);
+    matcher->setEuclideanFitnessEpsilon(fitness_epsilon);
+
+    return matcher;
   }
 
   void initialize_params() {
@@ -95,6 +124,15 @@ private:
     downsample_filter = voxelgrid;
 
     NODELET_INFO("create registration method for localization");
+    // scan matching related
+    scan_matching_method = private_nh.param<std::string>("scan_matching_method", "NDT");
+    iterations = private_nh.param<int>("iterations", 10);
+    ransac_iterations = private_nh.param<int>("ransac_iterations", 0);
+    ransac_outlier_rejection = private_nh.param<double>("ransac_outlier_rejection", 0.05);
+    max_correspondence_distance = private_nh.param<double>("max_correspondence_distance", 0.3);
+    transformation_epsilon = private_nh.param<double>("transformation_epsilon", 2.5e-5);
+    rotation_epsilon = private_nh.param<double>("rotation_epsilon", 0.0);
+    fitness_epsilon = private_nh.param<double>("fitness_epsilon", 0.1);
     registration = create_registration();
 
     // global localization
@@ -214,10 +252,7 @@ private:
     if(aligned_pub.getNumSubscribers()) {
       aligned->header.frame_id = "map";
       aligned->header.stamp = cloud->header.stamp;
-
-      sensor_msgs::PointCloud2 aligned_msg;
-      pcl::toROSMsg(*aligned, aligned_msg);
-      aligned_pub.publish(aligned_msg);
+      aligned_pub.publish(*aligned);
     }
 
     if(status_pub.getNumSubscribers()) {
@@ -414,13 +449,13 @@ private:
       num_valid_points++;
 
       registration->getSearchMethodTarget()->nearestKSearch(pt, 1, k_indices, k_sq_dists);
-      if(k_sq_dists.size() > 0 && k_sq_dists[0] < max_correspondence_dist * max_correspondence_dist) {
+      if(!k_sq_dists.empty() && k_sq_dists[0] < max_correspondence_dist * max_correspondence_dist) {
         status.matching_error += k_sq_dists[0];
         num_inliers++;
       }
     }
 
-    status.matching_error /= (num_inliers + 1e-6);
+    status.matching_error /= (num_inliers + 1e-9);
     status.inlier_fraction = static_cast<float>(num_inliers) / std::max(1, num_valid_points);
     status.relative_pose = tf2::eigenToTransform(Eigen::Isometry3d(registration->getFinalTransformation().cast<double>())).transform;
 
@@ -497,6 +532,15 @@ private:
   ros::ServiceServer relocalize_server;
   ros::ServiceClient set_global_map_service;
   ros::ServiceClient query_global_localization_service;
+
+  std::string scan_matching_method;
+  int iterations;
+  int ransac_iterations;
+  double ransac_outlier_rejection;
+  double max_correspondence_distance;
+  double transformation_epsilon;
+  double rotation_epsilon;
+  double fitness_epsilon;
 };
 }
 
